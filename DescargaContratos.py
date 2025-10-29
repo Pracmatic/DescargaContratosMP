@@ -82,6 +82,22 @@ def safe_filename(name: str) -> str:
     # quitar espacios al final
     return name
 
+
+def normalize_output_stem(name: str) -> str:
+    """Devuelve un nombre de archivo sin extensión para generar .xlsx."""
+
+    sanitized = safe_filename(name)
+    lowered = sanitized.lower()
+    for ext in (".xlsx", ".xls", ".xlsm", ".csv", ".tsv"):
+        if lowered.endswith(ext):
+            sanitized = sanitized[: -len(ext)]
+            break
+
+    sanitized = sanitized.rstrip(".")
+    if not sanitized:
+        sanitized = "archivo"
+    return sanitized
+
 def read_table_from_excel(path: Path, sheet_name: str, table_name: str) -> Tuple[List[str], List[List[object]]]:
     """
     Lee una tabla estructurada de Excel por nombre usando openpyxl.
@@ -143,7 +159,7 @@ def extract_links_and_names(headers: List[str], rows: List[List[object]], excel_
             name_val = row[name_idx]
             if name_val is None:
                 continue
-            nombre_archivo = safe_filename(str(name_val))
+            nombre_archivo = normalize_output_stem(str(name_val))
 
             if url:
                 pares.append((url, nombre_archivo))
