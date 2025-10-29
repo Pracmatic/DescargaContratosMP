@@ -32,7 +32,7 @@ from openpyxl.utils import range_boundaries, get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
 # -------------------- Config --------------------
-BASE_DIR = Path.cwd()
+BASE_DIR = Path(__file__).resolve().parent
 CONSOLIDADO_PATH = BASE_DIR / "CONSOLIDADO.xlsx"
 SALIDA_DIR = BASE_DIR / "SLEP"
 HOJA_CONSOLIDADO = "Hoja1"
@@ -59,24 +59,27 @@ def read_table_from_excel(path: Path, sheet_name: str, table_name: str) -> Tuple
     Retorna (headers, rows).
     """
     wb = load_workbook(path, data_only=True, read_only=False)
-    if sheet_name not in wb.sheetnames:
-        raise ValueError(f"No existe la hoja '{sheet_name}' en {path.name}")
-    ws = wb[sheet_name]
+    try:
+        if sheet_name not in wb.sheetnames:
+            raise ValueError(f"No existe la hoja '{sheet_name}' en {path.name}")
+        ws = wb[sheet_name]
 
-    if table_name not in ws.tables:
-        raise ValueError(f"No existe la tabla '{table_name}' en la hoja '{sheet_name}' de {path.name}")
+        if table_name not in ws.tables:
+            raise ValueError(f"No existe la tabla '{table_name}' en la hoja '{sheet_name}' de {path.name}")
 
-    table = ws.tables[table_name]
-    min_col, min_row, max_col, max_row = range_boundaries(table.ref)
+        table = ws.tables[table_name]
+        min_col, min_row, max_col, max_row = range_boundaries(table.ref)
 
-    # primera fila de la tabla = encabezados
-    headers = [ws.cell(row=min_row, column=c).value for c in range(min_col, max_col + 1)]
+        # primera fila de la tabla = encabezados
+        headers = [ws.cell(row=min_row, column=c).value for c in range(min_col, max_col + 1)]
 
-    rows = []
-    for r in range(min_row + 1, max_row + 1):
-        rows.append([ws.cell(row=r, column=c).value for c in range(min_col, max_col + 1)])
+        rows = []
+        for r in range(min_row + 1, max_row + 1):
+            rows.append([ws.cell(row=r, column=c).value for c in range(min_col, max_col + 1)])
 
-    return headers, rows
+        return headers, rows
+    finally:
+        wb.close()
 
 def extract_links_and_names(headers: List[str], rows: List[List[object]], excel_path: Path) -> List[Tuple[str, str]]:
     """
@@ -91,30 +94,33 @@ def extract_links_and_names(headers: List[str], rows: List[List[object]], excel_
 
     # Abrimos el libro para poder leer los hipervínculos reales si existen
     wb = load_workbook(excel_path, data_only=True, read_only=False)
-    ws = wb[HOJA_CONSOLIDADO]
-    # Localizar nuevamente los límites de la tabla para conocer fila inicial
-    table = ws.tables[NOMBRE_TABLA_CONSOLIDADO]
-    min_col, min_row, max_col, max_row = range_boundaries(table.ref)
+    try:
+        ws = wb[HOJA_CONSOLIDADO]
+        # Localizar nuevamente los límites de la tabla para conocer fila inicial
+        table = ws.tables[NOMBRE_TABLA_CONSOLIDADO]
+        min_col, min_row, max_col, max_row = range_boundaries(table.ref)
 
-    pares: List[Tuple[str, str]] = []
-    for i, row in enumerate(rows, start=0):
-        cell_link = ws.cell(row=min_row + 1 + i, column=min_col + link_idx)
-        # Si hay hipervínculo, preferimos el target; si no, tomamos el valor literal
-        url = None
-        if cell_link.hyperlink is not None and getattr(cell_link.hyperlink, "target", None):
-            url = cell_link.hyperlink.target
-        else:
-            # caemos al valor textual
-            url = str(row[link_idx]).strip() if row[link_idx] is not None else ""
+        pares: List[Tuple[str, str]] = []
+        for i, row in enumerate(rows, start=0):
+            cell_link = ws.cell(row=min_row + 1 + i, column=min_col + link_idx)
+            # Si hay hipervínculo, preferimos el target; si no, tomamos el valor literal
+            url = None
+            if cell_link.hyperlink is not None and getattr(cell_link.hyperlink, "target", None):
+                url = cell_link.hyperlink.target
+            else:
+                # caemos al valor textual
+                url = str(row[link_idx]).strip() if row[link_idx] is not None else ""
 
-        name_val = row[name_idx]
-        if name_val is None:
-            continue
-        nombre_archivo = safe_filename(str(name_val))
+            name_val = row[name_idx]
+            if name_val is None:
+                continue
+            nombre_archivo = safe_filename(str(name_val))
 
-        if url:
-            pares.append((url, nombre_archivo))
-    return pares
+            if url:
+                pares.append((url, nombre_archivo))
+        return pares
+    finally:
+        wb.close()
 
 def download_file(url: str) -> bytes:
     resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT, stream=True)
@@ -213,12 +219,15 @@ def save_dataframe_to_xlsx(df: pd.DataFrame, out_path: Path, sheet_name: str) ->
 
     # Reabrimos para aplicar tabla y asegurar hoja única/nombre
     wb = load_workbook(out_path)
-    ensure_single_sheet_and_name(wb, sheet_name)
-    ws = wb.active
+    try:
+        ensure_single_sheet_and_name(wb, sheet_name)
+        ws = wb.active
 
-    # Crear tabla A:Y sobre todas las filas con datos
-    add_table_A_to_Y(ws, NOMBRE_TABLA_FINAL)
-    wb.save(out_path)
+        # Crear tabla A:Y sobre todas las filas con datos
+        add_table_A_to_Y(ws, NOMBRE_TABLA_FINAL)
+        wb.save(out_path)
+    finally:
+        wb.close()
 
 def process_downloaded_bytes(data: bytes, out_xlsx: Path) -> None:
     """
